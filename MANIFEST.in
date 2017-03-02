@@ -1,0 +1,3 @@
+include MANIFEST.in README.md
+include ecs_api.spec
+recursive-include *.py
