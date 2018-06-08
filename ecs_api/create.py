@@ -4,41 +4,37 @@ import sys
 
 json_spec = {
     "server": {
-        "availability_zone": "eu-de-01",
+        "availability_zone": "cn-east-2a",
         "name": "ecs-wshi-api",
-        "imageRef": "32fda0a4-ab10-4dd4-b398-583a5919cdef",
+        "imageRef": "726802ee-a5c6-4b2e-9a2f-66f24f205313",
         "root_volume": {
             "volumetype": "SATA",
-            "size": 10
-        },  
-        "data_volumes": [
-            {   
-                "volumetype": "SATA",
-                "size": 100 
-            },  
-            {   
-                "volumetype": "SSD",
-                "size": 100 
-            }   
-        ],  
-        "flavorRef": "normal1",
-        "vpcid": "623adb0a-9e35-4611-8c90-6c90d93331d5",
+            "size": 40
+        },
+        "flavorRef": "s1.medium",
+        "vpcid": "3a4250b1-9256-4b04-8607-dd220c6ae991",
         "security_groups": [
-            {   
-                "id": "eeebcb30-ad60-4f7f-9be5-0d946cd56fb2"
-            }   
-        ],  
+            {
+                "id": "088dcd24-3a1d-45b2-bafe-370eec5dffab"
+            }
+        ],
         "nics": [
-            {   
-                "subnet_id": "1bff2730-36d5-437b-8e8d-26d388f67eb0"
-            }   
-        ],  
+            {
+                "subnet_id": "960f27f3-37b3-4a39-8746-2746acb991a2"
+            }
+        ],
         "publicip": {
-            "id": "948cc53c-469c-412c-81d5-6092107e0e52"
-        },  
-        "key_name": "KeyPair-wshi",
+            "eip": {
+                "iptype": "5_sbgp",
+                "bandwidth": {
+                    "size": 1,
+                    "sharetype": "PER"
+                }
+            }
+        },
+        "key_name": "wshi",
         "count": 1
-    }   
+    }
 }
 
 
@@ -56,7 +52,7 @@ def help():
 
 def main(argv=sys.argv):
     if len(argv) != 2:
-        print("Error: ecs create requires 1 arguement")
+        print("Error: ecs create requires 1 argument")
     if argv[1] == 'spec':
         with open('ecs_json', 'w') as fp:
             json.dump(json_spec, fp, indent=4)

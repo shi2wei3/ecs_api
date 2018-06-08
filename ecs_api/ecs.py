@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from ecs_api import ECSApi
 from textwrap import wrap
 import traceback
@@ -25,7 +27,7 @@ SUBCOMMAND_HELP = {
     'resize': ('<ServerID> <FlavorRef>', 'Modify the specifications of the ECS.'),
     'rename': ('<ServerID> <NewName>', 'Modify the name of the ECS.'),
     'flavors': ('', 'Getting list of flavors.'),
-    'images': ('', 'Getting list of flavors.'),
+    'images': ('', 'Getting list of images.'),
     'vpcs': ('', 'Getting list of VPCs.'),
     'subnets': ('<VPCID>', 'Getting list of subnets.'),
     'eips': ('', 'Getting list of elastic IP addresses.'),
@@ -47,7 +49,7 @@ SUBCOMMAND_HELP = {
                        'Delete one or multiple NICs from an ECS.'),
     'network-list': ('<ServerID>',
                      'List virtual network interfaces attached to an ECS.'),
-    'evs-create': ('<name>, <size>, <vol_type>, <az>, [<count>]',
+    'evs-create': ('<name>, <size>, <vol_type>, [<count>]',
                    'Create one or multiple Elastic Volume Service (EVS) disks.'),
     'evs-delete': ('<VolumeID>', 'Delete an EVS disk.'),
     'evs-list': ('', 'List all EVS disks.'),
@@ -116,7 +118,7 @@ def ecs_resize(args):
 
 
 def ecs_list(args):
-    j_content = ECSApi().query_ecss()
+    j_content = ECSApi().query_ecs()
     if len(j_content['servers']) == 0:
         print("No servers")
     else:
@@ -126,10 +128,7 @@ def ecs_list(args):
 
 
 def ecs_info(args):
-    if len(args) > 0:
-        j_content = ECSApi().query_ecss_detail(args[0])
-    else:
-        j_content = ECSApi().query_ecss_detail()
+    j_content = ECSApi().query_ecs_detail()
     if len(j_content['servers']) == 0:
         print("No servers")
     else:
@@ -299,7 +298,7 @@ def ecs_network_list(args):
 
 
 def ecs_evs_create(args):
-    arg_check(args, 4, 5)
+    arg_check(args, 3, 4)
     j_content = ECSApi().create_evss(*args)
     if "job_id" not in j_content:
         print("Error")
@@ -328,6 +327,7 @@ def ecs_evs_list(args):
 def ecs_importcommand(command, args):
     cmd = __import__(command, globals(), locals(), 'ecs_api')
     cmd.main([command] + args)
+
 
 commands = {
     # domain commands

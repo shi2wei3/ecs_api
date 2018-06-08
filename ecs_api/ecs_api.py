@@ -1,8 +1,10 @@
 import json
 import logging
-from ecs_auth import get_token
 from requests.compat import urljoin
+from datetime import datetime, timedelta
 import requests
+import getpass
+import os
 
 # Disable HTTPS verification warnings.
 try:
@@ -13,11 +15,85 @@ else:
     urllib3.disable_warnings()
 
 
+token_file = os.path.expanduser('~') + '/.ecs_token'
+
+
+def get_token(base_url, project_name, domain_name, username, password):
+    token_uri = "/v3/auth/tokens"
+    auth_url = urljoin(base_url, token_uri)
+    if os.path.isfile(token_file):
+        with open(token_file, 'r') as fp:
+            j_token = json.load(fp)
+        expire_date = datetime.strptime(j_token['expires_at'], '%Y-%m-%dT%H:%M:%S.%fZ') + timedelta(hours=8)
+        now = datetime.now()
+        if now > expire_date:
+            token, project_id = ecs_get_token(auth_url, project_name, domain_name, username, password)
+        else:
+            token = j_token['token']
+            project_id = j_token['project_id']
+    else:
+        token, project_id = ecs_get_token(auth_url, project_name, domain_name, username, password)
+    return token, project_id
+
+
+def ecs_get_token(auth_url, project_name, domain_name, username, password):
+    s = requests.Session()
+    data = {
+        "auth": {
+            "identity": {
+                "methods": [
+                    "password"
+                ],
+                "password": {
+                    "user": {
+                        "name": username,
+                        "password": password,
+                        "domain": {
+                            "name": domain_name
+                        }
+                    }
+                }
+            },
+            "scope": {
+                "project": {
+                    "name": project_name
+                }
+            }
+        }
+    }
+    logging.info("Request for token")
+    headers = {'Content-Type': 'application/json;charset=utf8'}
+    r = s.post(auth_url, json=data, headers=headers)
+    if r.status_code != 201:
+        logging.error("%s %s." % (r.status_code, r.text))
+        exit(r.status_code)
+    j_content = json.loads(r.text)
+    token = r.headers['X-Subject-Token']
+    project_id = j_content['token']['project']['id']
+    j_token = {'token': token, 'expires_at': j_content['token']['expires_at'],
+               'project_id': project_id}
+    with open(token_file, 'w') as fp:
+        json.dump(j_token, fp)
+    return token, project_id
+
+
+def validate_token(token, auth_url):
+    logging.info("Validate token")
+    s = requests.Session()
+    headers = {'Content-Type': 'application/json;charset=utf8', 'X-Auth-Token': token, 'X-Subject-Token': token}
+    r = s.get(auth_url, headers=headers)
+    if r.status_code != 200:
+        logging.error("%s %s." % (r.status_code, r.text))
+        exit(r.status_code)
+    j_content = json.loads(r.text)
+    print(j_content['token']['expires_at'])
+
+
 class ECSSession(object):
-    def __init__(self, base_url):
+    def __init__(self, auth_url, project_name, domain_name, username, password):
         self.s = requests.Session()
         self.headers = {'Content-Type': 'application/json;charset=utf8'}
-        self.token, self.project_id = get_token(base_url)
+        self.token, self.project_id = get_token(auth_url, project_name, domain_name, username, password)
         self.headers['X-Auth-Token'] = self.token
         self.s.headers.update(self.headers)
         self.r = None
@@ -26,7 +102,7 @@ class ECSSession(object):
         logging.debug("Making api get call to %s" % url)
         try:
             self.r = self.s.get(url, headers=self.headers)
-        except:
+        except requests.exceptions.RequestException:
             logging.error("connection to ecs failed")
         # convert response to json
         return self.__json()
@@ -35,7 +111,7 @@ class ECSSession(object):
         logging.debug("Making api post call to %s" % url)
         try:
             self.r = self.s.post(url, json=data, headers=self.headers)
-        except:
+        except requests.exceptions.RequestException:
             logging.error("connection to ecs failed")
         # convert response to json
         return self.__json()
@@ -44,7 +120,7 @@ class ECSSession(object):
         logging.debug("Making api put call to %s" % url)
         try:
             self.r = self.s.put(url, json=data, headers=self.headers)
-        except:
+        except requests.exceptions.RequestException:
             logging.error("connection to ecs failed")
         # convert response to json
         return self.__json()
@@ -53,30 +129,48 @@ class ECSSession(object):
         logging.debug("Making api delete call to %s" % url)
         try:
             self.r = self.s.delete(url, headers=self.headers)
-        except:
+        except requests.exceptions.RequestException:
             logging.error("connection to ecs failed")
 
     def __json(self):
         try:
             json_obj = json.loads(self.r.text)
             return json_obj
-        except:
+        except ValueError:
             logging.error("Unable to convert string to json\n %s" % self.r.text)
 
 
 class ECSApi(ECSSession):
     def __init__(self):
-        self.base_url = "https://ecs.eu-de.otctest.t-systems.com/"
-        super(ECSApi, self).__init__(self.base_url)
+
+        # Huawei connection credentials
+        project_name = raw_input("Project name [%s]: " % "cn-east-2") or "cn-east-2"
+        self.base_url = "https://ecs.%s.myhuaweicloud.com/" % project_name
+        auth_url = self.base_url.replace("ecs", "iam", 1)
+        domain_name = raw_input("Domain name [%s]: " % "chris-new") or "chris-new"
+        username = raw_input("Username [%s]: " % "rht-wshi") or "rht-wshi"
+        password = getpass.getpass('Password:')
+
+        # VM creation parameters
+        self.keypair = "wshi"
+        self.vm_name = "avocado_cloud"
+        self.image_ref = "726802ee-a5c6-4b2e-9a2f-66f24f205313"
+        self.vpc_id = "3a4250b1-9256-4b04-8607-dd220c6ae991"
+        self.subnet_id = "960f27f3-37b3-4a39-8746-2746acb991a2"
+        self.sg_id = "088dcd24-3a1d-45b2-bafe-370eec5dffab"
+        self.az = "cn-east-2a"
+        self.flavor_ref = "s1.medium"
+
+        super(ECSApi, self).__init__(auth_url, project_name, domain_name, username, password)
 
     def make_request(self, endpoint, action, data=None):
-        function = {
+        functions = {
             'get': self.get,
             'post': self.post,
             'put': self.put,
             'delete': self.delete
         }
-        func = function[action]
+        func = functions[action]
         if data:
             json_obj = func(endpoint, data=data)
         else:
@@ -92,12 +186,12 @@ class ECSApi(ECSSession):
         endpoint = urljoin(self.base_url, "/v1/%s/cloudservers" % self.project_id)
         json_ecs = {
             "server": {
-                "availability_zone": "eu-de-01",
-                "name": "ecs-wshi-api",
-                "imageRef": "32fda0a4-ab10-4dd4-b398-583a5919cdef",
+                "availability_zone": self.az,
+                "name": self.vm_name,
+                "imageRef": self.image_ref,
                 "root_volume": {
                     "volumetype": "SATA",
-                    "size": 10
+                    "size": 40
                 },
                 "data_volumes": [
                     {
@@ -109,22 +203,28 @@ class ECSApi(ECSSession):
                         "size": 100
                     }
                 ],
-                "flavorRef": "normal1",
-                "vpcid": "623adb0a-9e35-4611-8c90-6c90d93331d5",
+                "flavorRef": self.flavor_ref,
+                "vpcid": self.vpc_id,
                 "security_groups": [
                     {
-                        "id": "eeebcb30-ad60-4f7f-9be5-0d946cd56fb2"
+                        "id": self.sg_id
                     }
                 ],
                 "nics": [
                     {
-                        "subnet_id": "1bff2730-36d5-437b-8e8d-26d388f67eb0"
+                        "subnet_id": self.subnet_id
                     }
                 ],
                 "publicip": {
-                    "id": "948cc53c-469c-412c-81d5-6092107e0e52"
+                    "eip": {
+                        "iptype": "5_sbgp",
+                        "bandwidth": {
+                            "size": 1,
+                            "sharetype": "PER"
+                        }
+                    }
                 },
-                "key_name": "KeyPair-wshi",
+                "key_name": self.keypair,
                 "count": 1
             }
         }
@@ -139,7 +239,7 @@ class ECSApi(ECSSession):
         endpoint = urljoin(self.base_url, "/v1/%s/cloudservers/delete" % self.project_id)
         data = {
             "servers": [],
-            "delete_publicip": False,
+            "delete_publicip": True,
             "delete_volume": True
         }
         for server_id in server_ids:
@@ -188,19 +288,16 @@ class ECSApi(ECSSession):
             data["os-start"]["servers"].append({"id": server_id})
         return self.make_request(endpoint, 'post', data=data)
 
-    def query_ecss(self):
-        """ This interface is used to query ECSs. """
-        logging.info("Query ECSs")
-        endpoint = urljoin(self.base_url, "/v2/%s/servers" % self.project_id)
+    def query_ecs(self):
+        """ This interface is used to query ECS. """
+        logging.info("Query ECS")
+        endpoint = urljoin(self.base_url, "/v2/%s/servers?name=%s" % (self.project_id, self.vm_name))
         return self.make_request(endpoint, 'get')
 
-    def query_ecss_detail(self, name=None):
-        """ This interface is used to query details about ECSs. """
-        logging.info("Query details about ECSs")
-        if name is None:
-            endpoint = urljoin(self.base_url, "/v2/%s/servers/detail" % self.project_id)
-        else:
-            endpoint = urljoin(self.base_url, "/v2/%s/servers/detail?name=%s" % (self.project_id, name))
+    def query_ecs_detail(self):
+        """ This interface is used to query details about ECS. """
+        logging.info("Query details about ECS")
+        endpoint = urljoin(self.base_url, "/v2/%s/servers/detail?name=%s" % (self.project_id, self.vm_name))
         return self.make_request(endpoint, 'get')
 
     def modify_ecs_info(self, server_id, name):
@@ -249,7 +346,7 @@ class ECSApi(ECSSession):
         """ This interface is used to query images using search criteria and to display the images in a list. """
         logging.info("Getting list of images")
         endpoint = urljoin(self.base_url,
-                           "/v2/cloudimages?__imagetype=gold&__platform=RedHat&sort_key=created_at")
+                           "/v2/cloudimages?__imagetype=shared&__platform=RedHat&sort_key=created_at")
         return self.make_request(endpoint, 'get')
 
     def query_vpcs(self):
@@ -303,7 +400,7 @@ class ECSApi(ECSSession):
                            (self.project_id, server_id))
         return self.make_request(endpoint, 'get')
 
-    def add_nics(self, server_id, count, subnet_id, security_group_id):
+    def add_nics(self, server_id, count):
         """ This interface is used to add one or multiple NICs to an ECS. """
         logging.info("Add one or multiple NICs to an ECS")
         endpoint = urljoin(self.base_url, "/v1/%s/cloudservers/%s/nics" %
@@ -312,10 +409,10 @@ class ECSApi(ECSSession):
             "nics": []
         }
         nic = {
-            "subnet_id": subnet_id,
+            "subnet_id": self.subnet_id,
             "security_groups": [
                 {
-                    "id": security_group_id
+                    "id": self.sg_id
                 }
             ]
         }
@@ -362,19 +459,21 @@ class ECSApi(ECSSession):
                            (self.project_id, server_id, volume_id))
         return self.make_request(endpoint, 'delete')
 
-    def create_evss(self, name, size, vol_type, az, count=1):
+    def create_evss(self, name, size, vol_type, passthrough=False, count=1):
         """ This interface is used to create one or multiple Elastic Volume Service (EVS) disks. """
         logging.info("Create one or multiple Elastic Volume Service (EVS) disks")
         endpoint = urljoin(self.base_url, "/v2/%s/cloudvolumes" % self.project_id)
         data = {
             "volume": {
                 "count": count,
-                "availability_zone": az,
+                "availability_zone": self.az,
                 "size": int(size),
                 "name": name,
                 "volume_type": vol_type,
             }
         }
+        if passthrough:
+            data["volume"]["metadata"] = {"hw:passthrough": "true"}
         return self.make_request(endpoint, 'post', data=data)
 
     def delete_evs(self, volume_id):
@@ -389,9 +488,14 @@ class ECSApi(ECSSession):
         endpoint = urljoin(self.base_url, "/v2/%s/cloudvolumes/detail" % self.project_id)
         return self.make_request(endpoint, 'get')
 
+    def query_quota(self):
+        logging.info("Getting information about the tenant quota")
+        endpoint = urljoin(self.base_url, "/v1/%s/cloudservers/limits" % self.project_id)
+        return self.make_request(endpoint, 'get')
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
 
     ecs = ECSApi()
-    print(ecs.query_ecss())
+    print(ecs.query_evss())
